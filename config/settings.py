@@ -12,20 +12,51 @@ https://docs.djangoproject.com/en/6.0/ref/settings/
 
 from pathlib import Path
 
+import environ
+from django.core.exceptions import ImproperlyConfigured
+
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
+
+env = environ.Env()
+# .env is gitignored and optional — if absent, the defaults below reproduce
+# the original startproject-generated (local-dev-only) behavior exactly.
+environ.Env.read_env(BASE_DIR / '.env')
 
 
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/6.0/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-%m9-ri%dbw5-kptqk$nuzyoi&!b8*70%9)7wj%yw1q2qp#9g!1'
+# Set a real SECRET_KEY via the SECRET_KEY env var before deploying — see
+# .env.example. The fallback below is the original startproject-generated
+# insecure key, kept only so local dev works without creating a .env file.
+SECRET_KEY = env('SECRET_KEY', default='django-insecure-%m9-ri%dbw5-kptqk$nuzyoi&!b8*70%9)7wj%yw1q2qp#9g!1')
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = env.bool('DEBUG', default=True)
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = env.list('ALLOWED_HOSTS', default=[])
+
+# Fail fast rather than silently signing sessions/CSRF tokens with a
+# publicly-known key if DEBUG=False is set without also setting a real
+# SECRET_KEY via the environment.
+if not DEBUG and SECRET_KEY.startswith('django-insecure-'):
+    raise ImproperlyConfigured(
+        "DEBUG is False but SECRET_KEY is still the startproject default. "
+        "Set a real SECRET_KEY via the environment before running with DEBUG=False."
+    )
+
+# Session/CSRF cookie hardening. SESSION_COOKIE_HTTPONLY/SAMESITE and
+# CSRF_COOKIE_SAMESITE are set explicitly even though they match Django's
+# defaults, so the intent is visible rather than implicit. *_SECURE is tied
+# to DEBUG so local dev over plain HTTP keeps working; set DEBUG = False
+# (with a real ALLOWED_HOSTS) before deploying so these become True.
+SESSION_COOKIE_HTTPONLY = True
+SESSION_COOKIE_SAMESITE = 'Lax'
+SESSION_COOKIE_SECURE = not DEBUG
+CSRF_COOKIE_SAMESITE = 'Lax'
+CSRF_COOKIE_SECURE = not DEBUG
 
 
 # Application definition
@@ -37,7 +68,27 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    'rest_framework',
+    'accounts',
 ]
+
+REST_FRAMEWORK = {
+    'DEFAULT_AUTHENTICATION_CLASSES': [
+        'rest_framework.authentication.SessionAuthentication',
+    ],
+    'DEFAULT_PERMISSION_CLASSES': [
+        'rest_framework.permissions.IsAuthenticated',
+    ],
+    'DEFAULT_THROTTLE_RATES': {
+        'signup': '5/hour',
+        'login': '10/min',
+    },
+    # No reverse proxy/load balancer in front of this project — 0 means
+    # get_ident() always uses REMOTE_ADDR and ignores any client-supplied
+    # X-Forwarded-For header, so a client can't spoof a fresh throttle
+    # bucket per request. Revisit if a trusted proxy is introduced later.
+    'NUM_PROXIES': 0,
+}
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
@@ -76,6 +127,28 @@ DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.sqlite3',
         'NAME': BASE_DIR / 'db.sqlite3',
+        'OPTIONS': {
+            # WAL mode lets readers proceed concurrently with a single
+            # writer, and the longer busy timeout makes transient lock
+            # contention retry instead of immediately raising "database is
+            # locked" — needed now that CACHES (below) also writes to this
+            # same file on every throttled request.
+            'init_command': 'PRAGMA journal_mode=wal;',
+            'timeout': 20,
+        },
+    }
+}
+
+# Backed by the existing SQLite database rather than the default per-process
+# LocMemCache, so throttle counters (and any future cache use) are shared
+# across worker processes instead of fragmenting per-process. Requires
+# `python manage.py createcachetable` once per environment (see CLAUDE.md).
+# Revisit with Redis/Memcached if this project ever needs a dedicated cache
+# service — not warranted at this project's current scale/infra.
+CACHES = {
+    'default': {
+        'BACKEND': 'django.core.cache.backends.db.DatabaseCache',
+        'LOCATION': 'django_cache_table',
     }
 }
 

@@ -42,3 +42,24 @@ class LearningSession(models.Model):
 
     def __str__(self):
         return f"{self.goal.title} — {self.date}"
+
+
+class Resource(models.Model):
+    class Type(models.TextChoices):
+        ARTICLE = "article", "Article"
+        VIDEO = "video", "Video"
+        REPO = "repo", "Repo"
+        DOC = "doc", "Doc"
+
+    goal = models.ForeignKey(Goal, on_delete=models.CASCADE, related_name="resources")
+    title = models.CharField(max_length=200)
+    url = models.URLField(max_length=500)
+    type = models.CharField(max_length=20, choices=Type.choices)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        indexes = [models.Index(fields=["goal", "type"])]
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return self.title

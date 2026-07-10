@@ -4,23 +4,34 @@ from rest_framework.exceptions import ValidationError
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
-from .models import Goal, LearningSession
-from .serializers import GoalSerializer, LearningSessionSerializer
+from .models import Goal, LearningSession, Resource
+from .serializers import (
+    GoalDetailSerializer,
+    GoalSerializer,
+    LearningSessionSerializer,
+    ResourceSerializer,
+)
 from .services import (
     GoalNotOwnedError,
     InvalidGoalIdError,
     InvalidStatusError,
     create_goal,
+    create_resource,
     create_session,
     delete_goal,
+    delete_resource,
     delete_session,
     get_goal_for_user,
+    get_resource_for_user,
     get_session_for_user,
     goals_for_user,
     list_goals_for_user,
+    list_resources_for_user,
     list_sessions_for_user,
+    resources_for_user,
     sessions_for_user,
     update_goal,
+    update_resource,
     update_session,
 )
 
@@ -50,7 +61,7 @@ class GoalListCreateView(generics.ListCreateAPIView):
 
 
 class GoalDetailView(generics.RetrieveUpdateDestroyAPIView):
-    serializer_class = GoalSerializer
+    serializer_class = GoalDetailSerializer
     permission_classes = [IsAuthenticated]
 
     def get_object(self):
@@ -108,3 +119,52 @@ class LearningSessionDetailView(generics.RetrieveUpdateDestroyAPIView):
 
     def perform_destroy(self, instance):
         delete_session(instance)
+
+
+class ResourceListCreateView(generics.ListCreateAPIView):
+    serializer_class = ResourceSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        # Base (unfiltered-by-goal) queryset used by the browsable API
+        # renderer's filter form and OPTIONS metadata; actual GET responses
+        # are served by list() below, which applies the goal filter.
+        return resources_for_user(self.request.user)
+
+    def list(self, request, *args, **kwargs):
+        goal_id = request.query_params.get("goal")
+        try:
+            resources = list_resources_for_user(request.user, goal_id=goal_id)
+        except InvalidGoalIdError as exc:
+            return Response({"goal": [str(exc)]}, status=status.HTTP_400_BAD_REQUEST)
+        serializer = self.get_serializer(resources, many=True)
+        return Response(serializer.data)
+
+    def perform_create(self, serializer):
+        try:
+            resource = create_resource(user=self.request.user, **serializer.validated_data)
+        except GoalNotOwnedError as exc:
+            raise ValidationError({"goal": [str(exc)]})
+        serializer.instance = resource
+
+
+class ResourceDetailView(generics.RetrieveUpdateDestroyAPIView):
+    serializer_class = ResourceSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_object(self):
+        try:
+            return get_resource_for_user(self.request.user, self.kwargs["pk"])
+        except Resource.DoesNotExist:
+            raise Http404
+
+    def perform_update(self, serializer):
+        try:
+            serializer.instance = update_resource(
+                serializer.instance, user=self.request.user, **serializer.validated_data
+            )
+        except GoalNotOwnedError as exc:
+            raise ValidationError({"goal": [str(exc)]})
+
+    def perform_destroy(self, instance):
+        delete_resource(instance)

@@ -2,3 +2,4 @@
 backlog.md
 claude-edits.log
 db.sqlite3
+config/__pycache__/

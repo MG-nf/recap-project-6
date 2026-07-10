@@ -139,7 +139,13 @@ WSGI_APPLICATION = 'config.wsgi.application'
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
+        # Overridable so Docker Compose can relocate the file onto a named
+        # volume instead of the bind-mounted repo directory — WAL mode's
+        # mmap-based shared memory (see OPTIONS below) doesn't work reliably
+        # over Docker Desktop's bind-mount filesystem translation on
+        # Windows/Mac, causing "disk I/O error" under `docker-compose up`.
+        # Unset (the default) reproduces the original local-dev path exactly.
+        'NAME': env('DATABASE_PATH', default=str(BASE_DIR / 'db.sqlite3')),
         'OPTIONS': {
             # WAL mode lets readers proceed concurrently with a single
             # writer, and the longer busy timeout makes transient lock

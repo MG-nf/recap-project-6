@@ -1,0 +1,20 @@
+services:
+  web:
+    build: .
+    volumes:
+      - .:/app
+      # SQLite lives on a named volume, not the bind mount above — WAL
+      # mode's mmap-based shared memory doesn't work reliably over Docker
+      # Desktop's bind-mount filesystem translation on Windows/Mac and
+      # causes "disk I/O error"; a named volume is a native Linux
+      # filesystem inside Docker's storage and doesn't have this problem.
+      - sqlite-data:/data
+    ports:
+      - "8000:8000"
+    environment:
+      - DEBUG=True
+      - ALLOWED_HOSTS=localhost,127.0.0.1
+      - DATABASE_PATH=/data/db.sqlite3
+
+volumes:
+  sqlite-data:

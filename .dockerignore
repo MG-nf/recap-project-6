@@ -1,0 +1,26 @@
+# Secrets — never bake a real .env into an image layer via `docker build`.
+# Note this is a build-context guarantee only: `docker-compose up`'s bind
+# mount (docker-compose.yml) gives the running container direct access to
+# whatever's actually in the host repo, including a real .env if one exists
+# there — that's intentional, and matches how this project already reads
+# .env for non-Docker local dev (config/settings.py).
+.env*
+!.env.example
+
+# Local SQLite database and its WAL journal siblings.
+db.sqlite3
+db.sqlite3-wal
+db.sqlite3-shm
+
+# Python artifacts.
+__pycache__/
+*.pyc
+
+# VCS / tooling / pipeline artifacts not needed at runtime.
+.git/
+.claude/
+plan/
+.playwright-mcp/
+backlog.md
+claude-edits.log
+WORKFLOW_STATE.md

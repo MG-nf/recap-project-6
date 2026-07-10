@@ -1,3 +1,4 @@
 .env*
 backlog.md
 claude-edits.log
+db.sqlite3

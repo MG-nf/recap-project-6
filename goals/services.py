@@ -1,4 +1,10 @@
+import logging
+import re
+
+from .ai_client import get_client
 from .models import Goal, LearningSession, Resource
+
+logger = logging.getLogger(__name__)
 
 
 class InvalidStatusError(Exception):
@@ -10,6 +16,14 @@ class InvalidGoalIdError(Exception):
 
 
 class GoalNotOwnedError(Exception):
+    pass
+
+
+class NoSessionDataError(Exception):
+    pass
+
+
+class AIServiceError(Exception):
     pass
 
 
@@ -127,3 +141,97 @@ def resources_by_type_for_goal(goal):
     for resource in Resource.objects.filter(goal=goal).order_by("type", "-created_at"):
         grouped.setdefault(resource.type, []).append(resource)
     return grouped
+
+
+MAX_ITEMS_PER_GOAL = 20
+MAX_NOTE_LENGTH = 500
+
+
+def gather_goal_context(goal):
+    # Capped to bound prompt size/token cost — goal.sessions/goal.resources are
+    # already ordered newest-first (Goal/LearningSession/Resource Meta.ordering),
+    # so this keeps the most recent activity, not an arbitrary slice.
+    sessions = list(goal.sessions.all()[:MAX_ITEMS_PER_GOAL])
+    resources = list(goal.resources.all()[:MAX_ITEMS_PER_GOAL])
+    if not sessions and not resources:
+        raise NoSessionDataError("This goal has no sessions or resources yet.")
+    return {
+        "title": goal.title,
+        "desc": goal.desc,
+        "status": goal.status,
+        "sessions": [
+            {
+                "date": str(s.date),
+                "duration": s.duration,
+                "notes": s.notes[:MAX_NOTE_LENGTH],
+                "tags": s.tags,
+            }
+            for s in sessions
+        ],
+        "resources": [{"title": r.title, "url": r.url, "type": r.type} for r in resources],
+    }
+
+
+def _context_to_prompt(context):
+    lines = [f"Goal: {context['title']} (status: {context['status']})"]
+    if context["desc"]:
+        lines.append(f"Description: {context['desc']}")
+    if context["sessions"]:
+        lines.append("Learning sessions:")
+        for session in context["sessions"]:
+            tags = ", ".join(session["tags"]) if session["tags"] else "none"
+            lines.append(
+                f"- {session['date']}, {session['duration']} min, tags: {tags}. "
+                f"Notes: {session['notes'] or 'none'}"
+            )
+    if context["resources"]:
+        lines.append("Resources:")
+        for resource in context["resources"]:
+            lines.append(f"- [{resource['type']}] {resource['title']} ({resource['url']})")
+    return "\n".join(lines)
+
+
+def _complete(prompt, client):
+    # get_client() runs outside the try below so a missing/invalid API key
+    # (AIConfigurationError) propagates untouched, not wrapped as AIServiceError.
+    client = client or get_client()
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": prompt}],
+        )
+        content = response.choices[0].message.content
+    except Exception as exc:
+        # Full detail is logged server-side only — the exception's own string
+        # form could contain upstream error bodies or other internals that
+        # shouldn't be echoed back to the client verbatim.
+        logger.exception("OpenAI request failed")
+        raise AIServiceError("The AI service is temporarily unavailable.") from exc
+    if not content:
+        logger.error("OpenAI returned an empty completion")
+        raise AIServiceError("The AI service returned an empty response.")
+    return content
+
+
+def generate_summary_for_goal(goal, *, client=None):
+    context = gather_goal_context(goal)
+    prompt = (
+        "Summarize this learning goal's progress in a short paragraph, "
+        f"based on the following data:\n\n{_context_to_prompt(context)}"
+    )
+    return _complete(prompt, client)
+
+
+def suggest_next_steps_for_goal(goal, *, client=None):
+    context = gather_goal_context(goal)
+    prompt = (
+        "Based on the following learning goal data, suggest 2-3 concrete next "
+        f"steps, one per line:\n\n{_context_to_prompt(context)}"
+    )
+    content = _complete(prompt, client)
+    steps = []
+    for line in content.strip().splitlines():
+        line = re.sub(r"^[\-\*\d]+[\.\)]?\s*", "", line.strip())
+        if line:
+            steps.append(line)
+    return steps[:3]

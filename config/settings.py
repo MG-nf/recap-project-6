@@ -38,6 +38,11 @@ DEBUG = env.bool('DEBUG', default=True)
 
 ALLOWED_HOSTS = env.list('ALLOWED_HOSTS', default=[])
 
+# Empty by default (no fail-fast at startup, unlike SECRET_KEY) — a missing
+# key only breaks the two AI endpoints, not the whole app; they fail at
+# request time via goals/ai_client.py::get_client() -> AIConfigurationError.
+OPENAI_API_KEY = env('OPENAI_API_KEY', default='')
+
 # Fail fast rather than silently signing sessions/CSRF tokens with a
 # publicly-known key if DEBUG=False is set without also setting a real
 # SECRET_KEY via the environment.

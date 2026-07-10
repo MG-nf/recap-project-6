@@ -1,9 +1,31 @@
+from types import SimpleNamespace
+from unittest.mock import patch
+
 from django.contrib.auth.models import User
+from django.test import override_settings
 from django.urls import reverse
 from rest_framework import status
 from rest_framework.test import APITestCase
 
+from .ai_client import AIConfigurationError, get_client
 from .models import Goal, LearningSession, Resource
+
+
+class FakeOpenAIClient:
+    """Stands in for openai.OpenAI() in tests — never makes a network call."""
+
+    def __init__(self, content=None, exception=None, raw_response=None):
+        self._content = content
+        self._exception = exception
+        self._raw_response = raw_response
+        self.chat = SimpleNamespace(completions=SimpleNamespace(create=self._create))
+
+    def _create(self, **kwargs):
+        if self._exception:
+            raise self._exception
+        if self._raw_response is not None:
+            return self._raw_response
+        return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=self._content))])
 
 
 class GoalModelTest(APITestCase):
@@ -582,3 +604,185 @@ class GoalResourcesByTypeTest(APITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data["resources_by_type"], {})
+
+
+class AIClientConfigTest(APITestCase):
+    @override_settings(OPENAI_API_KEY="")
+    def test_get_client_raises_when_key_missing(self):
+        with self.assertRaises(AIConfigurationError):
+            get_client()
+
+    @override_settings(OPENAI_API_KEY="sk-fake-test-key")
+    def test_get_client_returns_client_when_key_set(self):
+        client = get_client()
+        self.assertIsNotNone(client)
+
+
+class GatherGoalContextTest(APITestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(username="victor", password="s3cret-pass")
+        self.goal = Goal.objects.create(user=self.user, title="Learn Django")
+
+    def test_caps_number_of_sessions_and_resources(self):
+        from .services import MAX_ITEMS_PER_GOAL, gather_goal_context
+
+        for i in range(MAX_ITEMS_PER_GOAL + 5):
+            LearningSession.objects.create(
+                goal=self.goal, date="2026-07-10", duration=10, notes=f"session {i}"
+            )
+            Resource.objects.create(
+                goal=self.goal, title=f"resource {i}", url="https://example.com", type="doc"
+            )
+
+        context = gather_goal_context(self.goal)
+
+        self.assertEqual(len(context["sessions"]), MAX_ITEMS_PER_GOAL)
+        self.assertEqual(len(context["resources"]), MAX_ITEMS_PER_GOAL)
+
+    def test_truncates_long_session_notes(self):
+        from .services import MAX_NOTE_LENGTH, gather_goal_context
+
+        LearningSession.objects.create(
+            goal=self.goal, date="2026-07-10", duration=10, notes="x" * (MAX_NOTE_LENGTH + 100)
+        )
+
+        context = gather_goal_context(self.goal)
+
+        self.assertEqual(len(context["sessions"][0]["notes"]), MAX_NOTE_LENGTH)
+
+
+class GenerateSummaryTest(APITestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(username="rachel", password="s3cret-pass")
+        self.client.login(username="rachel", password="s3cret-pass")
+        self.goal = Goal.objects.create(user=self.user, title="Learn Testing")
+        LearningSession.objects.create(
+            goal=self.goal, date="2026-07-10", duration=30, notes="Wrote tests"
+        )
+        Resource.objects.create(
+            goal=self.goal, title="Docs", url="https://example.com", type="doc"
+        )
+
+    @patch("goals.services.get_client")
+    def test_generate_summary_returns_summary(self, mock_get_client):
+        mock_get_client.return_value = FakeOpenAIClient(content="You're making good progress.")
+
+        response = self.client.post(reverse("goal-generate-summary", args=[self.goal.pk]))
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["summary"], "You're making good progress.")
+
+    def test_rejects_goal_with_no_sessions_or_resources(self):
+        empty_goal = Goal.objects.create(user=self.user, title="Empty goal")
+
+        response = self.client.post(reverse("goal-generate-summary", args=[empty_goal.pk]))
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    @patch("goals.services.get_client")
+    def test_maps_upstream_api_error_to_502(self, mock_get_client):
+        mock_get_client.return_value = FakeOpenAIClient(exception=RuntimeError("boom"))
+
+        response = self.client.post(reverse("goal-generate-summary", args=[self.goal.pk]))
+
+        self.assertEqual(response.status_code, status.HTTP_502_BAD_GATEWAY)
+
+    @patch("goals.services.get_client")
+    def test_upstream_error_message_is_not_leaked_to_client(self, mock_get_client):
+        mock_get_client.return_value = FakeOpenAIClient(
+            exception=RuntimeError("super secret internal detail")
+        )
+
+        response = self.client.post(reverse("goal-generate-summary", args=[self.goal.pk]))
+
+        self.assertNotIn("super secret internal detail", str(response.data))
+
+    @patch("goals.services.get_client")
+    def test_malformed_response_with_no_choices_returns_502_not_500(self, mock_get_client):
+        mock_get_client.return_value = FakeOpenAIClient(raw_response=SimpleNamespace(choices=[]))
+
+        response = self.client.post(reverse("goal-generate-summary", args=[self.goal.pk]))
+
+        self.assertEqual(response.status_code, status.HTTP_502_BAD_GATEWAY)
+
+    @patch("goals.services.get_client")
+    def test_empty_completion_content_returns_502_not_500(self, mock_get_client):
+        mock_get_client.return_value = FakeOpenAIClient(content=None)
+
+        response = self.client.post(reverse("goal-generate-summary", args=[self.goal.pk]))
+
+        self.assertEqual(response.status_code, status.HTTP_502_BAD_GATEWAY)
+
+    def test_cannot_generate_summary_for_another_users_goal(self):
+        other_user = User.objects.create_user(username="sam", password="s3cret-pass")
+        other_goal = Goal.objects.create(user=other_user, title="Not yours")
+
+        response = self.client.post(reverse("goal-generate-summary", args=[other_goal.pk]))
+
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_unauthenticated_request_is_rejected(self):
+        self.client.logout()
+
+        response = self.client.post(reverse("goal-generate-summary", args=[self.goal.pk]))
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+
+class SuggestNextStepsTest(APITestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(username="tina", password="s3cret-pass")
+        self.client.login(username="tina", password="s3cret-pass")
+        self.goal = Goal.objects.create(user=self.user, title="Learn Testing")
+        LearningSession.objects.create(
+            goal=self.goal, date="2026-07-10", duration=30, notes="Wrote tests"
+        )
+
+    @patch("goals.services.get_client")
+    def test_truncates_more_than_three_steps(self, mock_get_client):
+        content = "1. Step one\n2. Step two\n3. Step three\n4. Step four"
+        mock_get_client.return_value = FakeOpenAIClient(content=content)
+
+        response = self.client.post(reverse("goal-suggest-next-steps", args=[self.goal.pk]))
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["steps"], ["Step one", "Step two", "Step three"])
+
+    @patch("goals.services.get_client")
+    def test_returns_fewer_than_three_without_error(self, mock_get_client):
+        mock_get_client.return_value = FakeOpenAIClient(content="- Only step")
+
+        response = self.client.post(reverse("goal-suggest-next-steps", args=[self.goal.pk]))
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["steps"], ["Only step"])
+
+    def test_rejects_goal_with_no_sessions_or_resources(self):
+        empty_goal = Goal.objects.create(user=self.user, title="Empty goal")
+
+        response = self.client.post(reverse("goal-suggest-next-steps", args=[empty_goal.pk]))
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    @patch("goals.services.get_client")
+    def test_maps_upstream_api_error_to_502(self, mock_get_client):
+        mock_get_client.return_value = FakeOpenAIClient(exception=RuntimeError("boom"))
+
+        response = self.client.post(reverse("goal-suggest-next-steps", args=[self.goal.pk]))
+
+        self.assertEqual(response.status_code, status.HTTP_502_BAD_GATEWAY)
+
+    def test_cannot_suggest_next_steps_for_another_users_goal(self):
+        other_user = User.objects.create_user(username="uma", password="s3cret-pass")
+        other_goal = Goal.objects.create(user=other_user, title="Not yours")
+
+        response = self.client.post(reverse("goal-suggest-next-steps", args=[other_goal.pk]))
+
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_unauthenticated_request_is_rejected(self):
+        self.client.logout()
+
+        response = self.client.post(reverse("goal-suggest-next-steps", args=[self.goal.pk]))
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)

@@ -3,7 +3,9 @@ from rest_framework import generics, status
 from rest_framework.exceptions import ValidationError
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
+from rest_framework.views import APIView
 
+from .ai_client import AIConfigurationError
 from .models import Goal, LearningSession, Resource
 from .serializers import (
     GoalDetailSerializer,
@@ -12,15 +14,18 @@ from .serializers import (
     ResourceSerializer,
 )
 from .services import (
+    AIServiceError,
     GoalNotOwnedError,
     InvalidGoalIdError,
     InvalidStatusError,
+    NoSessionDataError,
     create_goal,
     create_resource,
     create_session,
     delete_goal,
     delete_resource,
     delete_session,
+    generate_summary_for_goal,
     get_goal_for_user,
     get_resource_for_user,
     get_session_for_user,
@@ -30,6 +35,7 @@ from .services import (
     list_sessions_for_user,
     resources_for_user,
     sessions_for_user,
+    suggest_next_steps_for_goal,
     update_goal,
     update_resource,
     update_session,
@@ -168,3 +174,41 @@ class ResourceDetailView(generics.RetrieveUpdateDestroyAPIView):
 
     def perform_destroy(self, instance):
         delete_resource(instance)
+
+
+class GenerateSummaryView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        try:
+            goal = get_goal_for_user(request.user, pk)
+        except Goal.DoesNotExist:
+            raise Http404
+        try:
+            summary = generate_summary_for_goal(goal)
+        except NoSessionDataError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        except AIConfigurationError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        except AIServiceError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_502_BAD_GATEWAY)
+        return Response({"summary": summary})
+
+
+class SuggestNextStepsView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        try:
+            goal = get_goal_for_user(request.user, pk)
+        except Goal.DoesNotExist:
+            raise Http404
+        try:
+            steps = suggest_next_steps_for_goal(goal)
+        except NoSessionDataError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        except AIConfigurationError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        except AIServiceError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_502_BAD_GATEWAY)
+        return Response({"steps": steps})

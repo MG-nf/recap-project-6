@@ -1,0 +1,43 @@
+{% load static %}<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Learning Tracker{% endblock %}</title>
+    <link rel="stylesheet" href="{% static 'dashboard/css/style.css' %}">
+</head>
+<body>
+    <header>
+        <nav aria-label="Main navigation">
+            <a href="{% url 'dashboard:index' %}" class="brand">Learning Tracker</a>
+            <ul>
+                {% if user.is_authenticated %}
+                    <li><a href="{% url 'dashboard:index' %}">Dashboard</a></li>
+                    <li><a href="{% url 'dashboard:goal-list' %}">Goals</a></li>
+                    <li><a href="{% url 'dashboard:session-list' %}">Sessions</a></li>
+                    <li><a href="{% url 'dashboard:resource-list' %}">Resources</a></li>
+                    <li>
+                        <form action="{% url 'dashboard:logout' %}" method="post" class="logout-form">
+                            {% csrf_token %}
+                            <button type="submit">Logout</button>
+                        </form>
+                    </li>
+                {% else %}
+                    <li><a href="{% url 'dashboard:login' %}">Login</a></li>
+                {% endif %}
+            </ul>
+        </nav>
+    </header>
+    <main>
+        {% if messages %}
+            <ul class="messages">
+                {% for message in messages %}
+                    <li class="message {{ message.tags }}">{{ message }}</li>
+                {% endfor %}
+            </ul>
+        {% endif %}
+        <h1>{% block heading %}{% endblock %}</h1>
+        {% block content %}{% endblock %}
+    </main>
+</body>
+</html>

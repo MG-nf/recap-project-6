@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}{{ goal.title }}{% endblock %}
+{% block heading %}{{ goal.title }}{% endblock %}
+{% block content %}
+<p>Status: {{ goal.get_status_display }}</p>
+<p>{{ goal.desc }}</p>
+<p>
+    <a href="{% url 'dashboard:goal-edit' goal.pk %}">Edit</a>
+    <a href="{% url 'dashboard:goal-delete' goal.pk %}">Delete</a>
+</p>
+
+<section aria-labelledby="sessions-heading">
+    <h2 id="sessions-heading">Learning Sessions</h2>
+    <p><a href="{% url 'dashboard:session-create' %}">+ Log Session</a></p>
+    <ul>
+    {% for session in sessions %}
+        <li>{{ session.date }} — {{ session.duration }} min
+            <a href="{% url 'dashboard:session-edit' session.pk %}">Edit</a>
+            <a href="{% url 'dashboard:session-delete' session.pk %}">Delete</a>
+        </li>
+    {% empty %}
+        <li>No sessions logged for this goal yet.</li>
+    {% endfor %}
+    </ul>
+</section>
+
+<section aria-labelledby="resources-heading">
+    <h2 id="resources-heading">Resources</h2>
+    <p><a href="{% url 'dashboard:resource-create' %}">+ Add Resource</a></p>
+    {% for type, resources in resources_by_type.items %}
+        <h3>{{ type }}</h3>
+        <ul>
+        {% for resource in resources %}
+            <li><a href="{{ resource.url }}">{{ resource.title }}</a>
+                <a href="{% url 'dashboard:resource-edit' resource.pk %}">Edit</a>
+                <a href="{% url 'dashboard:resource-delete' resource.pk %}">Delete</a>
+            </li>
+        {% endfor %}
+        </ul>
+    {% empty %}
+        <p>No resources for this goal yet.</p>
+    {% endfor %}
+</section>
+{% endblock %}

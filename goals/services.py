@@ -1,10 +1,15 @@
 import logging
 import re
 
+from django.db.models import Count, Sum
+from django.db.models.functions import TruncWeek
+
 from .ai_client import get_client
 from .models import Goal, LearningSession, Resource
 
 logger = logging.getLogger(__name__)
+
+UNTAGGED_LABEL = "Untagged"
 
 
 class InvalidStatusError(Exception):
@@ -86,7 +91,10 @@ def get_session_for_user(user, pk):
     return sessions_for_user(user).get(pk=pk)
 
 
-def update_session(session, **fields):
+def update_session(session, *, user, **fields):
+    goal = fields.get("goal")
+    if goal is not None and goal.user_id != user.id:
+        raise GoalNotOwnedError("Goal does not belong to this user.")
     for field, value in fields.items():
         setattr(session, field, value)
     session.save()
@@ -235,3 +243,30 @@ def suggest_next_steps_for_goal(goal, *, client=None):
         if line:
             steps.append(line)
     return steps[:3]
+
+
+def goal_counts_by_status(user):
+    counts = {status: 0 for status in Goal.Status.values}
+    for row in goals_for_user(user).values("status").annotate(count=Count("id")):
+        counts[row["status"]] = row["count"]
+    return counts
+
+
+def duration_by_tag_for_goal(goal):
+    totals = {}
+    for session in goal.sessions.all():
+        tags = session.tags or [UNTAGGED_LABEL]
+        for tag in tags:
+            totals[tag] = totals.get(tag, 0) + session.duration
+    return totals
+
+
+def duration_by_week_for_user(user):
+    rows = (
+        sessions_for_user(user)
+        .annotate(week=TruncWeek("date"))
+        .values("week")
+        .annotate(total=Sum("duration"))
+        .order_by("week")
+    )
+    return [{"week": row["week"], "total": row["total"]} for row in rows]

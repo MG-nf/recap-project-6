@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}Goals{% endblock %}
+{% block heading %}Goals{% endblock %}
+{% block content %}
+<p><a href="{% url 'dashboard:goal-create' %}">+ New Goal</a></p>
+<form method="get" class="filter-form">
+    <label for="status-filter">Filter by status</label>
+    <select id="status-filter" name="status" onchange="this.form.submit()">
+        <option value="">All</option>
+        {% for value, label in statuses %}
+            <option value="{{ value }}" {% if request.GET.status == value %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+    </select>
+</form>
+<ul>
+{% for goal in goals %}
+    <li>
+        <a href="{% url 'dashboard:goal-detail' goal.pk %}">{{ goal.title }}</a>
+        — {{ goal.get_status_display }}
+        <a href="{% url 'dashboard:goal-edit' goal.pk %}">Edit</a>
+        <a href="{% url 'dashboard:goal-delete' goal.pk %}">Delete</a>
+    </li>
+{% empty %}
+    <li>No goals yet.</li>
+{% endfor %}
+</ul>
+{% endblock %}

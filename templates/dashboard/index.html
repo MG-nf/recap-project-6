@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block title %}Dashboard{% endblock %}
+{% block heading %}Dashboard{% endblock %}
+{% block content %}
+<section aria-labelledby="status-heading">
+    <h2 id="status-heading">Goals by Status</h2>
+    <table>
+        <thead><tr><th scope="col">Status</th><th scope="col">Count</th></tr></thead>
+        <tbody>
+        {% for status, count in status_counts.items %}
+            <tr><td>{{ status }}</td><td>{{ count }}</td></tr>
+        {% endfor %}
+        </tbody>
+    </table>
+</section>
+
+<section aria-labelledby="week-heading">
+    <h2 id="week-heading">Duration per Week</h2>
+    {% if week_totals %}
+    <table>
+        <thead><tr><th scope="col">Week of</th><th scope="col">Total minutes</th></tr></thead>
+        <tbody>
+        {% for row in week_totals %}
+            <tr><td>{{ row.week|date:"Y-m-d" }}</td><td>{{ row.total }}</td></tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p>No sessions logged yet.</p>
+    {% endif %}
+</section>
+
+<section aria-labelledby="tags-heading">
+    <h2 id="tags-heading">Duration per Tag, by Goal</h2>
+    {% for entry in goal_tag_breakdowns %}
+        <h3>{{ entry.goal.title }}</h3>
+        {% if entry.tags %}
+        <table>
+            <thead><tr><th scope="col">Tag</th><th scope="col">Total minutes</th></tr></thead>
+            <tbody>
+            {% for tag, total in entry.tags.items %}
+                <tr><td>{{ tag }}</td><td>{{ total }}</td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <p>No sessions logged for this goal yet.</p>
+        {% endif %}
+    {% empty %}
+        <p>No goals yet. <a href="{% url 'dashboard:goal-create' %}">Create one</a>.</p>
+    {% endfor %}
+</section>
+{% endblock %}

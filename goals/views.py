@@ -121,7 +121,12 @@ class LearningSessionDetailView(generics.RetrieveUpdateDestroyAPIView):
             raise Http404
 
     def perform_update(self, serializer):
-        serializer.instance = update_session(serializer.instance, **serializer.validated_data)
+        try:
+            serializer.instance = update_session(
+                serializer.instance, user=self.request.user, **serializer.validated_data
+            )
+        except GoalNotOwnedError as exc:
+            raise ValidationError({"goal": [str(exc)]})
 
     def perform_destroy(self, instance):
         delete_session(instance)

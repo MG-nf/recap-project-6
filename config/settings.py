@@ -76,7 +76,12 @@ INSTALLED_APPS = [
     'rest_framework',
     'accounts',
     'goals',
+    'dashboard',
 ]
+
+# Where the template UI redirects an unauthenticated visitor (dashboard's
+# @login_required views); unrelated to the JSON /api/auth/ endpoints.
+LOGIN_URL = 'dashboard:login'
 
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': [
@@ -111,7 +116,9 @@ ROOT_URLCONF = 'config.urls'
 TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
-        'DIRS': [],
+        # Top-level so every app's templates can {% extends "base.html" %}
+        # without relying on INSTALLED_APPS load order.
+        'DIRS': [BASE_DIR / 'templates'],
         'APP_DIRS': True,
         'OPTIONS': {
             'context_processors': [
@@ -194,3 +201,4 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/6.0/howto/static-files/
 
 STATIC_URL = 'static/'
+STATICFILES_DIRS = [BASE_DIR / 'static']

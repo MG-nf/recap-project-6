@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block title %}Sessions{% endblock %}
+{% block heading %}Sessions{% endblock %}
+{% block content %}
+<p><a href="{% url 'dashboard:session-create' %}">+ Log Session</a></p>
+<ul>
+{% for session in sessions %}
+    <li>{{ session.goal.title }} — {{ session.date }} — {{ session.duration }} min
+        <a href="{% url 'dashboard:session-edit' session.pk %}">Edit</a>
+        <a href="{% url 'dashboard:session-delete' session.pk %}">Delete</a>
+    </li>
+{% empty %}
+    <li>No sessions logged yet.</li>
+{% endfor %}
+</ul>
+{% endblock %}

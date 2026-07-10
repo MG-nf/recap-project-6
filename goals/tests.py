@@ -184,6 +184,21 @@ class LearningSessionCRUDTest(APITestCase):
         self.assertEqual(delete_response.status_code, status.HTTP_204_NO_CONTENT)
         self.assertFalse(LearningSession.objects.filter(pk=session_id).exists())
 
+    def test_update_rejects_reassigning_goal_to_another_users_goal(self):
+        session = LearningSession.objects.create(goal=self.goal, date="2026-07-10", duration=20)
+        other_user = User.objects.create_user(username="oscar", password="s3cret-pass")
+        other_goal = Goal.objects.create(user=other_user, title="Not yours")
+
+        response = self.client.patch(
+            reverse("session-detail", args=[session.pk]),
+            {"goal": other_goal.pk},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        session.refresh_from_db()
+        self.assertEqual(session.goal_id, self.goal.pk)
+
     def test_create_session_rejects_goal_owned_by_another_user(self):
         other_user = User.objects.create_user(username="erin", password="s3cret-pass")
         other_goal = Goal.objects.create(user=other_user, title="Not yours")

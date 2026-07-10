@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block title %}Resources{% endblock %}
+{% block heading %}Resources{% endblock %}
+{% block content %}
+<p><a href="{% url 'dashboard:resource-create' %}">+ Add Resource</a></p>
+<ul>
+{% for resource in resources %}
+    <li>{{ resource.goal.title }} — [{{ resource.get_type_display }}] <a href="{{ resource.url }}">{{ resource.title }}</a>
+        <a href="{% url 'dashboard:resource-edit' resource.pk %}">Edit</a>
+        <a href="{% url 'dashboard:resource-delete' resource.pk %}">Delete</a>
+    </li>
+{% empty %}
+    <li>No resources yet.</li>
+{% endfor %}
+</ul>
+{% endblock %}
